@@ -109,7 +109,7 @@ namespace ExamplePlugin
             // Converting the images into sprites
             for (int i = 0; i < 10; i++ ){
                 string currentPath = ranksPath[i];
-                ranksSprites.Add(.IMG2Sprite.LoadNewSprite(currentPath, 100.0f));
+                ranksSprites.Add(IMG2Sprite.LoadNewSprite(currentPath, 100.0f));
                 
             }
                        
