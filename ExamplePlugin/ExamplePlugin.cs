@@ -1,8 +1,24 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using BepInEx;
+using JetBrains.Annotations;
+using Mono.Cecil;
+using Mono.Security.Authenticode;
 using R2API;
+using R2API.Utils;
+using Rewired;
 using RoR2;
+using RoR2.Orbs;
+using RoR2.UI;
 using UnityEngine;
 using UnityEngine.AddressableAssets;
+using UnityEngine.Playables;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+using UnityEngine.XR.WSA;
+using TMPro;
+using ExamplePlugin;
 
 namespace ExamplePlugin
 {
@@ -20,7 +36,7 @@ namespace ExamplePlugin
     // This one is because we use a .language file for language tokens
     // More info in https://risk-of-thunder.github.io/R2Wiki/Mod-Creation/Assets/Localization/
     [BepInDependency(LanguageAPI.PluginGUID)]
-
+    
     // This attribute is required, and lists metadata for your plugin.
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
 
@@ -29,7 +45,7 @@ namespace ExamplePlugin
     // BaseUnityPlugin itself inherits from MonoBehaviour,
     // so you can use this as a reference for what you can declare and use in your plugin class
     // More information in the Unity Docs: https://docs.unity3d.com/ScriptReference/MonoBehaviour.html
-    public class ExamplePlugin : BaseUnityPlugin
+    public class THPSScoring : BaseUnityPlugin
     {
         // The Plugin GUID should be a unique ID for this plugin,
         // which is human readable (as it is used in places like the config).
@@ -37,107 +53,209 @@ namespace ExamplePlugin
         // we will deprecate this mod.
         // Change the PluginAuthor and the PluginName !
         public const string PluginGUID = PluginAuthor + "." + PluginName;
-        public const string PluginAuthor = "AuthorName";
-        public const string PluginName = "ExamplePlugin";
-        public const string PluginVersion = "1.0.0";
+        public const string PluginAuthor = "StepKotl";
+        public const string PluginName = "THPSScoring";
+        public const string PluginVersion = "0.1.0";
 
-        // We need our item definition to persist through our functions, and therefore make it a class field.
-        private static ItemDef myItemDef;
+        public double totalScore = 0;
+        public int airScore = 1;
+        public bool scoringActive = true;
+        public bool onStage;
 
-        // The Awake() method is run at the very start when the game is initialized.
+        // Ultrakill Scoring
+        // Points for each rank
+        public List<int> points = [0, 200, 300, 400, 500, 700, 850, 1000, 1500];
+        // Rate of decay
+        public List<double> decayMult = [1, 1, 1.25, 1.5, 2, 3, 4, 6, 8];
+        // File locations for each texture
+        public List<string> ranksPath = ["ExamplePlugin\\Textures\\RankD.png","ExamplePlugin\\Textures\\RankD.png","ExamplePlugin\\Textures\\RankC.png","ExamplePlugin\\Textures\\RankB.png","ExamplePlugin\\Textures\\RankA.png","ExamplePlugin\\Textures\\RankS.png","ExamplePlugin\\Textures\\RankSS.png","ExamplePlugin\\Textures\\RankSSS.png","ExamplePlugin\\Textures\\RankU.png"];
+
+        public List<Sprite> ranksSprites = [];
+
+
+        public int level = 0;
+        public HUD UI;
+        public string runActive = "NS";
+        public TextMeshProUGUI txt;
+        public Image img;        
+
+
+
+
         public void Awake()
         {
             // Init our logging class so that we can properly log for debugging
             Log.Init(Logger);
 
-            // First let's define our item
-            myItemDef = ScriptableObject.CreateInstance<ItemDef>();
 
-            // Language Tokens, explained there https://risk-of-thunder.github.io/R2Wiki/Mod-Creation/Assets/Localization/
-            myItemDef.name = "EXAMPLE_CLOAKONKILL_NAME";
-            myItemDef.nameToken = "EXAMPLE_CLOAKONKILL_NAME";
-            myItemDef.pickupToken = "EXAMPLE_CLOAKONKILL_PICKUP";
-            myItemDef.descriptionToken = "EXAMPLE_CLOAKONKILL_DESC";
-            myItemDef.loreToken = "EXAMPLE_CLOAKONKILL_LORE";
 
-            // The tier determines what rarity the item is:
-            // Tier1=white, Tier2=green, Tier3=red, Lunar=Lunar, Boss=yellow,
-            // and finally NoTier is generally used for helper items, like the tonic affliction
-#pragma warning disable Publicizer001 // Accessing a member that was not originally public. Here we ignore this warning because with how this example is setup we are forced to do this
-            myItemDef._itemTierDef = Addressables.LoadAssetAsync<ItemTierDef>("RoR2/Base/Common/Tier2Def.asset").WaitForCompletion();
-#pragma warning restore Publicizer001
-            // Instead of loading the itemtierdef directly, you can also do this like below as a workaround
-            // myItemDef.deprecatedTier = ItemTier.Tier2;
+            
 
-            // You can create your own icons and prefabs through assetbundles, but to keep this boilerplate brief, we'll be using question marks.
-            myItemDef.pickupIconSprite = Addressables.LoadAssetAsync<Sprite>("RoR2/Base/Common/MiscIcons/texMysteryIcon.png").WaitForCompletion();
-            myItemDef.pickupModelPrefab = Addressables.LoadAssetAsync<GameObject>("RoR2/Base/Mystery/PickupMystery.prefab").WaitForCompletion();
+            //hooking onto the UI elements
+            On.RoR2.UI.HUD.Awake += MyFunc;
+            
 
-            // Can remove determines
-            // if a shrine of order,
-            // or a printer can take this item,
-            // generally true, except for NoTier items.
-            myItemDef.canRemove = true;
 
-            // Hidden means that there will be no pickup notification,
-            // and it won't appear in the inventory at the top of the screen.
-            // This is useful for certain noTier helper items, such as the DrizzlePlayerHelper.
-            myItemDef.hidden = false;
-
-            // You can add your own display rules here,
-            // where the first argument passed are the default display rules:
-            // the ones used when no specific display rules for a character are found.
-            // For this example, we are omitting them,
-            // as they are quite a pain to set up without tools like https://thunderstore.io/package/KingEnderBrine/ItemDisplayPlacementHelper/
-            var displayRules = new ItemDisplayRuleDict(null);
-
-            // Then finally add it to R2API
-            ItemAPI.Add(new CustomItem(myItemDef, displayRules));
-
-            // But now we have defined an item, but it doesn't do anything yet. So we'll need to define that ourselves.
+            // Defining onEvents for damage and kills
+            GlobalEventManager.onServerDamageDealt += GlobalEventManager_onServerDamageDealt; 
             GlobalEventManager.onCharacterDeathGlobal += GlobalEventManager_onCharacterDeathGlobal;
+
+            // Defining 
+            Run.onRunStartGlobal += Run_onRunStartGlobal;
+            Run.onServerGameOver += Run_onServerGameOver;
+            Stage.onStageStartGlobal += Stage_onStageStartGlobal;
+
+
+            // Converting the images into sprites
+            for (int i = 0; i < 10; i++ ){
+                string currentPath = ranksPath[i];
+                ranksSprites.Add(.IMG2Sprite.LoadNewSprite(currentPath, 100.0f));
+                
+            }
+                       
+
         }
 
-        private void GlobalEventManager_onCharacterDeathGlobal(DamageReport report)
-        {
-            // If a character was killed by the world, we shouldn't do anything.
-            if (!report.attacker || !report.attackerBody)
-            {
-                return;
+        private void Stage_onStageStartGlobal(Stage stage){totalScore = 0;}
+        // When the stage changes, the counter should reset. 
+
+
+        private void Run_onRunStartGlobal(Run run){runActive = "T";}
+        private void Run_onServerGameOver(Run run, GameEndingDef def){runActive = "T";}
+        // the two above lines are used for starting and stopping the counter, and only when the run is active. 
+
+
+
+        // On the death of any character/enemy
+        private void GlobalEventManager_onCharacterDeathGlobal(DamageReport report) {
+
+            // if the attacker was the player of the current client, increase the multiplier (eventually depending on the type of enemy)
+            if (PlayerCharacterMasterController._instances[0].body.gameObject == report.attacker){
+                Log.Info($"Boss {report.victimIsBoss} | Elite {report.victimIsElite} | Champion {report.victimIsChampion}");
             }
+        }
 
-            var attackerCharacterBody = report.attackerBody;
 
-            // We need an inventory to do check for our item
-            if (attackerCharacterBody.inventory)
-            {
-                // Store the amount of our item we have
-                var garbCount = attackerCharacterBody.inventory.GetItemCount(myItemDef.itemIndex);
-                if (garbCount > 0 &&
-                    // Roll for our 50% chance.
-                    Util.CheckRoll(50, attackerCharacterBody.master))
-                {
-                    // Since we passed all checks, we now give our attacker the cloaked buff.
-                    // Note how we are scaling the buff duration depending on the number of the custom item in our inventory.
-                    attackerCharacterBody.AddTimedBuff(RoR2Content.Buffs.Cloak, 3 + garbCount);
+        //On an instance of damage
+        private void GlobalEventManager_onServerDamageDealt(DamageReport report){
+            
+            var CurrentDamage = PlayerCharacterMasterController.instances[0].body.damage;
+            //Check if the damage was done by the player of the current client
+            if (PlayerCharacterMasterController._instances[0].body.gameObject == report.attacker.gameObject){   
+                
+                double mult = 7.5;
+
+                // If the enemy attacked is a boss, multiply the amount of damage done by 1.5
+                if (report.victimIsBoss){    
+                    mult *= 1.5;
                 }
+
+
+                // If the enemy is an Elite, multiply the amount of damage done by 1.25
+                else if (report.victimIsElite){                    
+                    mult *= 1.25;
+                }
+                
+                totalScore += mult*(report.damageDealt/CurrentDamage);
+
+                
+                
+                
             }
+
+
+            if (PlayerCharacterMasterController._instances[0].body.gameObject == report.victim.gameObject){
+                totalScore -= report.damageDealt*5;
+
+            }
+
         }
 
-        // The Update() method is run on every frame of the game.
+        
+
+        //Commands that repeat every frame
         private void Update()
         {
-            // This if statement checks if the player has currently pressed F2.
-            if (Input.GetKeyDown(KeyCode.F2))
-            {
-                // Get the player body to use a position:
-                var transform = PlayerCharacterMasterController.instances[0].master.GetBodyObject().transform;
-
-                // And then drop our defined item in front of the player.
-
-                Log.Info($"Player pressed F2. Spawning our custom item at coordinates {transform.position}");
-                PickupDropletController.CreatePickupDroplet(PickupCatalog.FindPickupIndex(myItemDef.itemIndex), transform.position, transform.forward * 20f);
+        
+            // Increase the level when there are enough points and if it can 
+            if (level < 8){
+                if (totalScore >= points[level]){
+                    level += 1;
+                }
             }
+
+
+            // Decrease the level if it can 
+            if (level > 0){
+                if (totalScore <= points[level - 1]){
+                    level -= 1;
+                }
+            }
+
+
+            
+            if (runActive == "T"){
+
+                // Score Decay
+                if (totalScore >= 0){
+                    totalScore -= 15*decayMult[level]*Time.deltaTime*airScore;
+                }
+
+
+                // Score Min Reached
+                if (totalScore < 0){
+                    totalScore = 0;
+                }
+
+                // Rounding and Updating Score
+                string currentScore = Math.Round(totalScore, 0).ToString();
+                txt.text = $"<voffset=-2em><align=left><b>{currentScore}</b></voffset> \n Level = {level}";
+                img.sprite = ranksSprites[level];
+            }
+
+            if (runActive == "F"){
+                txt.text = "";
+            }
+        }
+
+
+        //Using the UI hook
+        private void MyFunc(On.RoR2.UI.HUD.orig_Awake orig, HUD self)
+        {
+            orig(self);
+            UI = self;
+
+            
+
+            //hud.mainContainer.transform // This will return the main container. You should put your UI elements under it or its children!
+            new GameObject("ScoreUI");
+            GameObject myObject = GameObject.Find("ScoreUI");
+            myObject.transform.SetParent(UI.mainContainer.transform);
+            RectTransform rectTransform = myObject.AddComponent<RectTransform>();
+            
+            rectTransform.anchorMin = Vector2.zero;
+            rectTransform.anchorMax = Vector2.one;
+            rectTransform.sizeDelta = Vector2.zero;
+            rectTransform.anchoredPosition = Vector2.zero;
+            txt = myObject.AddComponent<TextMeshProUGUI>();
+
+            img = myObject.AddComponent<Image>();
+            txt.text = "";
+            
+        }
+        
+        //UI Unhook
+        private void OnDestroy()
+        {
+        On.RoR2.UI.HUD.Awake -= MyFunc;
         }
     }
 }
+
+
+/* Features to add:
+- Multiplier with air time
+- Counter decay on damage
+- Visuals 
+
+*/
