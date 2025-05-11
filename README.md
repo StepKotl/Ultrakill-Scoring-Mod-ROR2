@@ -1,9 +1,6 @@
-# R2Boilerplate
+# Risk of Rain 2 Ultrakill Scoring Mod
 
-This repository contains a sample mod for Risk of Rain 2.
+Using a ROR2 (Risk of Rain 2) boilerplate, this mod takes the [scoring from Ultrakill](https://ultrakill.wiki.gg/wiki/Style) (excluding the bonus style points, as it would be too much effort for this mod specifically)
 
-You can clone this repository, open the visual studio solution file and compile it immediately.
-
-This repository is meant to represent best practices for starting a simple mod.
-
-Once your mod get compiled, you can utilize the Thunderstore folder for later uploading it to https://thunderstore.io/c/riskofrain2/
+This mod is incomplete, it needs:
+- Implement the actual style visuals (the messages showing your current style level)
